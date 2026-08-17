@@ -100,6 +100,17 @@ class PingChecker:
             failures=failures,
         )
 
+    def _decode_output(self, raw_bytes: bytes) -> str:
+        """Windows cp932 / utf-8 / latin-1 の多層フォールバックデコード"""
+        if not raw_bytes:
+            return ""
+        for enc in ["cp932", "utf-8", "shift_jis", "latin-1"]:
+            try:
+                return raw_bytes.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return raw_bytes.decode("utf-8", errors="ignore")
+
     def _ping_once(self, ip: str, timeout: float) -> tuple[bool, Optional[float], Optional[str]]:
         """
         OSネイティブのpingコマンドを1回実行。
@@ -120,21 +131,21 @@ class PingChecker:
             )
             elapsed = (time.perf_counter() - t0) * 1000  # ms
 
+            stdout_str = self._decode_output(result.stdout)
+            stderr_str = self._decode_output(result.stderr)
+
             if result.returncode == 0:
-                output = result.stdout.decode(errors="ignore")
-                lat = self._parse_latency(output, elapsed)
+                lat = self._parse_latency(stdout_str, elapsed)
                 return True, lat, None
             else:
-                err_out = result.stderr.decode(errors="ignore") + result.stdout.decode(errors="ignore")
+                err_out = stderr_str + "\n" + stdout_str
                 return False, None, self._classify_error(err_out)
 
         except subprocess.TimeoutExpired:
             return False, None, "timeout"
-        except PermissionError:
+        except (PermissionError, FileNotFoundError):
             return False, None, "permission_denied"
-        except FileNotFoundError:
-            return False, None, "permission_denied"
-        except Exception as e:
+        except Exception:
             return False, None, "unknown"
 
     def _parse_latency(self, output: str, fallback: float) -> float:

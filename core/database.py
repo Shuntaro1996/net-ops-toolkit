@@ -33,6 +33,8 @@ class Database:
     def _init_db(self):
         """テーブルが存在しない場合のみ作成する。"""
         with self._conn() as conn:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS devices (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,9 +72,10 @@ class Database:
             """)
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
         return conn
 
     # ─────────────────────────────────────────────
@@ -301,3 +304,85 @@ class Database:
             )
             added += 1
         return added, errors
+
+    # ─────────────────────────────────────────────
+    # 最新ステータス一括取得 & Prometheusエクスポート
+    # ─────────────────────────────────────────────
+
+    def get_latest_status_all(self) -> pd.DataFrame:
+        """
+        全機器の最新1件のPingステータスをJOINして取得する。
+        未チェック機器も含まれる。
+        """
+        with self._conn() as conn:
+            rows = conn.execute("""
+                SELECT 
+                    d.id,
+                    d.host,
+                    d.ip,
+                    d.type,
+                    d.grp,
+                    d.timeout_sec,
+                    d.retry_count,
+                    h.status,
+                    h.latency_ms,
+                    h.error_type,
+                    h.method,
+                    h.checked_at
+                FROM devices d
+                LEFT JOIN (
+                    SELECT p1.*
+                    FROM ping_history p1
+                    INNER JOIN (
+                        SELECT device_id, MAX(id) AS max_id
+                        FROM ping_history
+                        GROUP BY device_id
+                    ) p2 ON p1.id = p2.max_id
+                ) h ON d.id = h.device_id
+                ORDER BY d.grp, d.host
+            """).fetchall()
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame([dict(r) for r in rows])
+        df["status"] = df["status"].fillna("—")
+        return df
+
+    def export_prometheus_metrics(self) -> str:
+        """
+        Prometheus Exporter 互換のメトリクス文字列を出力する。
+        """
+        df = self.get_latest_status_all()
+        if df.empty:
+            return "# No devices configured\n"
+
+        lines = [
+            "# HELP netops_device_up Device availability status (1 = Online, 0 = Offline/Unknown)",
+            "# TYPE netops_device_up gauge",
+        ]
+        for _, row in df.iterrows():
+            val = 1 if row["status"] == "Online" else 0
+            lines.append(f'netops_device_up{{host="{row["host"]}",ip="{row["ip"]}",group="{row["grp"]}",type="{row["type"]}"}} {val}')
+
+        lines.extend([
+            "",
+            "# HELP netops_device_latency_ms Round-trip ICMP/TCP ping latency in milliseconds",
+            "# TYPE netops_device_latency_ms gauge",
+        ])
+        for _, row in df.iterrows():
+            if row["status"] == "Online" and pd.notna(row["latency_ms"]):
+                lines.append(f'netops_device_latency_ms{{host="{row["host"]}",ip="{row["ip"]}",group="{row["grp"]}"}} {row["latency_ms"]:.2f}')
+
+        uptime_24h = self.get_uptime_all(hours=24)
+        lines.extend([
+            "",
+            "# HELP netops_device_uptime_ratio_24h 24-hour uptime ratio between 0.0 and 1.0",
+            "# TYPE netops_device_uptime_ratio_24h gauge",
+        ])
+        for _, row in df.iterrows():
+            did = row["id"]
+            u = uptime_24h.get(did)
+            if u is not None:
+                lines.append(f'netops_device_uptime_ratio_24h{{host="{row["host"]}",ip="{row["ip"]}"}} {(u / 100.0):.4f}')
+
+        lines.append("")
+        return "\n".join(lines)

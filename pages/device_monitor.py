@@ -38,7 +38,6 @@ def render(config: dict, db: Database, checker: PingChecker, notifier: Notifier)
     ss.setdefault("polling_active", config.get("polling", {}).get("enabled_on_startup", False))
     ss.setdefault("poll_interval", config.get("polling", {}).get("default_interval_seconds", 60))
     ss.setdefault("last_checked", None)
-    ss.setdefault("check_results", pd.DataFrame())
     ss.setdefault("alert_log", [])
 
     # ─────────────────────────────────────────────────
@@ -67,6 +66,20 @@ def render(config: dict, db: Database, checker: PingChecker, notifier: Notifier)
 
         st.divider()
 
+        # Prometheus / 外部連携エクスポート
+        st.markdown("**📊 外部監視連携**")
+        prom_metrics = db.export_prometheus_metrics()
+        st.download_button(
+            label="📥 Prometheus Metrics 出力",
+            data=prom_metrics,
+            file_name="netops_metrics.prom",
+            mime="text/plain",
+            use_container_width=True,
+            help="Prometheus / Grafana / Zabbix で取り込める標準メトリクス形式です。"
+        )
+
+        st.divider()
+
         # 通知テスト
         st.markdown("**アラート通知**")
         if st.button("🔔 通知テスト送信", use_container_width=True):
@@ -90,11 +103,34 @@ def render(config: dict, db: Database, checker: PingChecker, notifier: Notifier)
     if run_now or (ss.polling_active and _should_poll(ss.last_checked, ss.poll_interval)):
         _run_check(db, checker, notifier, config)
 
+    # 最新ステータスをDBから取得
+    latest_df = db.get_latest_status_all()
+
     with col_ts:
         if ss.last_checked:
-            st.caption(f"🕐 最終チェック: {ss.last_checked}")
+            st.caption(f"🕐 最終チェック実行: {ss.last_checked}")
+        elif not latest_df.empty and pd.notna(latest_df["checked_at"].max()):
+            st.caption(f"🕐 直近ログ記録: {latest_df['checked_at'].max()}")
         else:
             st.caption("📋 「今すぐチェック」ボタンを押すか、自動更新を有効にしてください。")
+
+    # ─────────────────────────────────────────────────
+    # グローバル緊急障害アラートバナー (Sticky Alert)
+    # ─────────────────────────────────────────────────
+    if not latest_df.empty:
+        offline_devices = latest_df[latest_df["status"] == "Offline"]
+        if not offline_devices.empty:
+            offline_list_str = ", ".join([f"<b>{row['host']}</b> ({row['ip']})" for _, row in offline_devices.iterrows()])
+            st.markdown(
+                f'<div class="global-alert-banner">'
+                f'<div class="alert-icon">🚨</div>'
+                f'<div>'
+                f'<div class="alert-title">緊急障害検知: {len(offline_devices)} 台の機器がオフラインです</div>'
+                f'<div class="alert-desc">対象機器: {offline_list_str}</div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
 
     st.divider()
 
@@ -105,7 +141,7 @@ def render(config: dict, db: Database, checker: PingChecker, notifier: Notifier)
     if selected_group != "すべて":
         devices_df = devices_df[devices_df["grp"] == selected_group]
 
-    data = ss.check_results
+    data = latest_df
     if not data.empty and selected_group != "すべて":
         data = data[data["grp"] == selected_group]
 
@@ -117,19 +153,19 @@ def render(config: dict, db: Database, checker: PingChecker, notifier: Notifier)
 
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("監視機器", f"{len(data)} 台")
-        c2.metric("✅ Online",   f"{online_cnt} 台")
-        c3.metric("🔴 Offline",  f"{offline_cnt} 台", delta_color="inverse")
-        c4.metric("⏳ 未チェック", f"{unknown_cnt} 台")
+        c2.metric("Online 稼働中", f"{online_cnt} 台")
+        c3.metric("Offline 障害", f"{offline_cnt} 台", delta=f"{offline_cnt} 台" if offline_cnt > 0 else None, delta_color="inverse")
+        c4.metric("未チェック", f"{unknown_cnt} 台")
         c5.metric("平均レイテンシ", f"{avg_lat:.1f} ms" if pd.notna(avg_lat) else "—")
     else:
-        st.info("まだチェック結果がありません。")
+        st.info("監視対象の機器が登録されていません。上の「機器リスト管理」から追加してください。")
         return
 
     # ─────────────────────────────────────────────────
     # アラートログ表示
     # ─────────────────────────────────────────────────
     if ss.alert_log:
-        with st.expander(f"🔔 アラートログ（{len(ss.alert_log)}件）", expanded=False):
+        with st.expander(f"🔔 アラート通知履歴（{len(ss.alert_log)}件）", expanded=False):
             for entry in reversed(ss.alert_log[-20:]):
                 icon = "🔴" if entry["type"] == "offline" else "🟢"
                 st.markdown(f"{icon} `{entry['time']}` **{entry['host']}** — {entry['message']}")
@@ -244,19 +280,21 @@ def _render_status_table(data: pd.DataFrame):
 
     def _style_status(val):
         if val == "Offline":
-            return "background-color:rgba(239,68,68,0.2);color:#ef4444;font-weight:700"
+            return "background-color: rgba(239, 68, 68, 0.2); color: #f87171; font-weight: 700;"
         if val == "Online":
-            return "background-color:rgba(34,197,94,0.15);color:#22c55e"
-        return "color:#64748b"
+            return "background-color: rgba(16, 185, 129, 0.15); color: #34d399; font-weight: 600;"
+        return "color: #94a3b8;"
 
     def _style_latency(val):
         if pd.isna(val) or val is None:
-            return ""
+            return "color: #64748b;"
         if val < 10:
-            return "color:#22c55e"
+            return "color: #38bdf8; font-weight: 600;"
         if val < 50:
-            return "color:#f59e0b"
-        return "color:#ef4444"
+            return "color: #34d399;"
+        if val < 100:
+            return "color: #fbbf24;"
+        return "color: #f87171; font-weight: 700;"
 
     styled = display.style.map(_style_status, subset=["Status"])
     if "Latency (ms)" in display.columns:

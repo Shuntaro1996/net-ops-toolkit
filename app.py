@@ -43,40 +43,41 @@ def _load_css():
 _load_css()
 
 
+from core.config_manager import ConfigManager
+
 # ─────────────────────────────────────────────────────
-# 設定ファイル読み込み
+# 設定管理（ホットリロード対応）
 # ─────────────────────────────────────────────────────
 @st.cache_resource
-def _load_config() -> dict:
+def _get_config_manager() -> ConfigManager:
     cfg_path = os.path.join(BASE_DIR, "config.yaml")
-    if os.path.exists(cfg_path):
-        with open(cfg_path, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    return {}
+    return ConfigManager(cfg_path)
 
-config = _load_config()
+config_mgr = _get_config_manager()
+config = config_mgr.get_config()
 
 
 # ─────────────────────────────────────────────────────
 # コアリソースの初期化（シングルトン）
 # ─────────────────────────────────────────────────────
 @st.cache_resource
-def _init_resources(config: dict):
-    raw_db_path = config.get("database", {}).get("path", "netops.db")
+def _init_resources():
+    cfg = config_mgr.get_config()
+    raw_db_path = cfg.get("database", {}).get("path", "netops.db")
     if not os.path.isabs(raw_db_path):
         db_path = os.path.join(BASE_DIR, raw_db_path)
     else:
         db_path = raw_db_path
     db      = Database(db_path)
     # デフォルト機器を初回登録
-    defaults = config.get("default_devices", [])
+    defaults = cfg.get("default_devices", [])
     if defaults:
         db.seed_defaults(defaults)
-    checker  = PingChecker(config)
-    notifier = Notifier(config)
+    checker  = PingChecker(cfg)
+    notifier = Notifier(cfg)
     return db, checker, notifier
 
-db, checker, notifier = _init_resources(config)
+db, checker, notifier = _init_resources()
 
 
 # ─────────────────────────────────────────────────────
@@ -115,15 +116,23 @@ if not _check_auth():
     st.stop()
 
 # ヘッダー
-col_title, col_logout = st.columns([6, 1])
+col_title, col_actions = st.columns([5, 2])
 with col_title:
     st.title("🌐 Network Infrastructure & Wi-Fi RSSI Dashboard")
     st.caption("Wi-Fi電波状況の可視化 ／ ネットワーク機器の死活監視・アラート通知ツール")
-with col_logout:
-    if config.get("auth", {}).get("enabled", False):
-        if st.button("🔓 ログアウト", use_container_width=True):
-            st.session_state.authenticated = False
+with col_actions:
+    c_btn1, c_btn2 = st.columns(2)
+    with c_btn1:
+        if st.button("🔄 設定再読込", use_container_width=True, help="config.yaml の変更を即時反映します"):
+            config_mgr.reload()
+            st.cache_resource.clear()
+            st.success("設定を更新しました")
             st.rerun()
+    with c_btn2:
+        if config.get("auth", {}).get("enabled", False):
+            if st.button("🔓 ログアウト", use_container_width=True):
+                st.session_state.authenticated = False
+                st.rerun()
 
 # タブ
 tab1, tab2 = st.tabs(["📶 Wi-Fi RSSI Heatmap", "🖥️ Device Status Monitor"])

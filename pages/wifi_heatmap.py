@@ -134,7 +134,24 @@ def render():
             key="rssi_editor",
         )
         st.session_state.rssi_df = df
-        st.info("💡 数値を直接編集すると右のマップが即座に更新されます。")
+
+        # クイック測定点追加フォーム
+        with st.expander("➕ 測定ポイントをクイック追加", expanded=False):
+            with st.form("quick_add_point"):
+                qa_c1, qa_c2 = st.columns(2)
+                fw, fd = st.session_state.floor_size
+                qa_x = qa_c1.number_input("X座標 (m)", 0.0, float(fw), float(fw)/2, 0.5)
+                qa_y = qa_c2.number_input("Y座標 (m)", 0.0, float(fd), float(fd)/2, 0.5)
+                qa_c3, qa_c4 = st.columns(2)
+                qa_rssi = qa_c3.number_input("RSSI (dBm)", -100, 0, -65, 1)
+                qa_name = qa_c4.text_input("点名", f"P{len(df)+1}")
+                if st.form_submit_button("＋ リストに追加", use_container_width=True):
+                    new_row = pd.DataFrame([{
+                        "X座標 (m)": qa_x, "Y座標 (m)": qa_y,
+                        "RSSI (dBm)": qa_rssi, "測定点名": qa_name
+                    }])
+                    st.session_state.rssi_df = pd.concat([st.session_state.rssi_df, new_row], ignore_index=True)
+                    st.rerun()
 
         # ── RSSIサマリー ──
         st.markdown("**📊 電波品質サマリー**")
@@ -145,17 +162,17 @@ def render():
             weak_pct = (rssi_vals < -75).sum() / len(rssi_vals) * 100
 
             m1, m2, m3 = st.columns(3)
-            m1.metric("平均", f"{avg_rssi:.1f} dBm")
-            m2.metric("最弱点", f"{min_rssi:.0f} dBm")
-            m3.metric("弱電界 (<-75)", f"{weak_pct:.0f}%")
+            m1.metric("平均電波強度", f"{avg_rssi:.1f} dBm")
+            m2.metric("最弱測定点", f"{min_rssi:.0f} dBm")
+            m3.metric("弱電界率 (< -75dBm)", f"{weak_pct:.0f}%")
 
             # 品質評価
             if avg_rssi >= -60:
-                st.success("🟢 全体的に電波状況は良好です")
+                st.success("🟢 **電波品質: 優良** — フロア全体で安定した通信が期待できます。")
             elif avg_rssi >= -70:
-                st.warning("🟡 一部エリアで電波が弱い可能性があります")
+                st.warning("🟡 **電波品質: 良好** — 一部エリアで速度低下の可能性があります。")
             else:
-                st.error("🔴 複数エリアでAPの追加設置を検討してください")
+                st.error("🔴 **電波品質: 改善推奨** — 複数エリアでAP増設または出力調整が必要です。")
 
     with col_plot:
         _render_heatmap(df, st.session_state.floor_size, st.session_state.floor_image)
@@ -209,28 +226,37 @@ def _render_heatmap(df: pd.DataFrame, floor_size: tuple, floor_image: bytes | No
             layer="below",
         )
 
-    # 等高線ヒートマップ
+    # 等高線ヒートマップ (UniFi / Datadog Pro Palette)
     fig.add_trace(go.Contour(
         z=grid_z.T,
         x=np.linspace(0, fw, 100),
         y=np.linspace(0, fd, 100),
         colorscale=[
-            [0.0,  "#ef4444"],   # -90 dBm 弱
-            [0.25, "#f59e0b"],
-            [0.6,  "#84cc16"],
-            [1.0,  "#22c55e"],   #   0 dBm 強
+            [0.0,  "#e11d48"],   # -90 dBm 弱 (Rose / Crimson)
+            [0.25, "#f59e0b"],   # -77 dBm 注意 (Amber)
+            [0.55, "#10b981"],   # -62 dBm 良好 (Emerald)
+            [1.0,  "#06b6d4"],   # -40 dBm 強 (Cyan)
         ],
         zmin=-90, zmax=-40,
-        colorbar=dict(title=dict(text="RSSI (dBm)", side="top")),
-        contours=dict(showlabels=True, labelfont=dict(size=10)),
-        opacity=0.75,
+        colorbar=dict(
+            title=dict(text="RSSI (dBm)", side="top", font=dict(size=11, color="#cbd5e1")),
+            tickfont=dict(color="#94a3b8", size=10),
+            thickness=14,
+            len=0.9,
+        ),
+        contours=dict(
+            showlabels=True,
+            labelfont=dict(size=10, color="#ffffff"),
+            coloring="heatmap",
+        ),
+        opacity=0.82,
     ))
 
     # 測定ポイントマーカー
     hover_texts = [
         f"<b>{row.get('測定点名', f'P{i+1}')}</b><br>"
-        f"X={row['X座標 (m)']}m, Y={row['Y座標 (m)']}m<br>"
-        f"RSSI: {row['RSSI (dBm)']} dBm"
+        f"X: {row['X座標 (m)']} m, Y: {row['Y座標 (m)']} m<br>"
+        f"<b>RSSI: {row['RSSI (dBm)']} dBm</b>"
         for i, (_, row) in enumerate(valid.iterrows())
     ]
     fig.add_trace(go.Scatter(
@@ -239,21 +265,41 @@ def _render_heatmap(df: pd.DataFrame, floor_size: tuple, floor_image: bytes | No
         mode="markers+text",
         text=valid.get("測定点名", [f"P{i+1}" for i in range(len(valid))]),
         textposition="top center",
+        textfont=dict(size=11, color="#f8fafc", family="JetBrains Mono"),
         hovertext=hover_texts,
         hoverinfo="text",
-        marker=dict(size=12, color="white", symbol="x",
-                    line=dict(color="black", width=2)),
+        marker=dict(
+            size=11,
+            color="#22d3ee",
+            symbol="diamond",
+            line=dict(color="#0f172a", width=2),
+        ),
         name="測定ポイント",
     ))
 
     fig.update_layout(
-        title=f"フロア RSSI ヒートマップ（{fw}m × {fd}m）",
-        xaxis=dict(title="幅 (m)", range=[0, fw], showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
-        yaxis=dict(title="奥行 (m)", range=[0, fd], showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
-        height=520,
-        plot_bgcolor="rgba(15,23,42,0.8)",
+        title=dict(
+            text=f"フロア RSSI ヒートマップ（{fw}m × {fd}m）",
+            font=dict(size=14, color="#f1f5f9"),
+        ),
+        xaxis=dict(
+            title=dict(text="幅 (m)", font=dict(color="#94a3b8")),
+            range=[0, fw],
+            showgrid=True,
+            gridcolor="rgba(148,163,184,0.12)",
+            tickfont=dict(color="#94a3b8"),
+        ),
+        yaxis=dict(
+            title=dict(text="奥行 (m)", font=dict(color="#94a3b8")),
+            range=[0, fd],
+            showgrid=True,
+            gridcolor="rgba(148,163,184,0.12)",
+            tickfont=dict(color="#94a3b8"),
+        ),
+        height=530,
+        plot_bgcolor="rgba(15,23,42,0.9)",
         paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#e2e8f0"),
-        margin=dict(t=40, b=20, l=20, r=20),
+        margin=dict(t=45, b=25, l=25, r=25),
     )
     st.plotly_chart(fig, use_container_width=True)
