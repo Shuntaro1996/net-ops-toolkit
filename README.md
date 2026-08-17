@@ -63,28 +63,26 @@ graph TD
 
 ---
 
-## 🚀 クイックスタート (Getting Started)
+## 🚀 起動方法 (Quick Start)
 
-### 1. リポジトリのクローン
+### 💡 一番カンタンな方法（Windows）
+1. 本リポジトリをダウンロードまたはクローンします。
+2. フォルダ内の **`Start-Toolkit.bat`** （または `start.bat`）をダブルクリックします。
+   * 必要な依存ライブラリが自動チェックされ、ブラウザが立ち上がります（`http://localhost:8501`）。
+
+---
+
+### コマンドラインからの起動手順
+
 ```bash
+# 1. リポジトリのクローン
 git clone https://github.com/Shuntaro1996/net-ops-toolkit.git
 cd net-ops-toolkit
-```
 
-### 2. 依存パッケージのインストール
-Python仮想環境（venv）の作成とアクティベートを推奨します。
-
-```bash
-# 仮想環境の作成と有効化 (Windows PowerShell)
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# パッケージのインストール
+# 2. 依存パッケージのインストール
 pip install -r requirements.txt
-```
 
-### 3. ダッシュボードの起動
-```bash
+# 3. アプリの起動
 streamlit run app.py
 ```
 ブラウザが自動的に開き、`http://localhost:8501` にてダッシュボードが表示されます。
