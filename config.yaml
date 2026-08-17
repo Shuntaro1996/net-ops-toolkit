@@ -1,0 +1,80 @@
+# =============================================================================
+# config.yaml — net-ops-toolkit 全体設定ファイル
+# 各設定は環境変数でも上書き可能（例: SLACK_WEBHOOK_URL）
+# =============================================================================
+
+auth:
+  enabled: true
+  password: "netops2026"          # ログインパスワード（変更推奨）
+
+polling:
+  default_interval_seconds: 60    # 自動ポーリング間隔（秒）
+  enabled_on_startup: false       # 起動時に自動ポーリングを開始するか
+
+notifications:
+  slack:
+    enabled: false
+    webhook_url: ""               # Slack Incoming Webhook URL を設定
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    sender: ""                    # 送信元メールアドレス
+    password: ""                  # App Password など
+    recipients: []                # 受信先メールアドレスのリスト
+  # Offline → Online 復旧時にも通知するか
+  notify_on_recovery: true
+  # 同一機器への通知クールダウン（秒）。連続通知を抑制する
+  cooldown_seconds: 300
+
+database:
+  path: "netops.db"               # SQLite DBファイルのパス
+
+ping:
+  default_count: 3                # Pingパケット送信回数
+  default_timeout: 1              # タイムアウト（秒）
+  fail_threshold: 2               # この回数以上失敗でOffline判定
+  tcp_fallback: true              # ICMP失敗時にTCP(port 80/443)でフォールバック
+  snmp:
+    enabled: false
+    community: "public"
+    port: 161
+    timeout: 2
+
+default_devices:
+  - host: "Core-Router-01"
+    ip: "192.168.1.1"
+    type: "Router"
+    group: "Core"
+    timeout: 1
+    retry: 3
+  - host: "PoE-Switch-A"
+    ip: "192.168.1.10"
+    type: "Switch"
+    group: "Access"
+    timeout: 1
+    retry: 3
+  - host: "PoE-Switch-B"
+    ip: "192.168.1.11"
+    type: "Switch"
+    group: "Access"
+    timeout: 1
+    retry: 3
+  - host: "AP-Floor-1F"
+    ip: "192.168.1.50"
+    type: "Access Point"
+    group: "1F"
+    timeout: 2
+    retry: 3
+  - host: "AP-Floor-2F"
+    ip: "192.168.1.51"
+    type: "Access Point"
+    group: "2F"
+    timeout: 2
+    retry: 3
+  - host: "NAS-Storage"
+    ip: "192.168.1.100"
+    type: "Storage"
+    group: "Core"
+    timeout: 1
+    retry: 3
