@@ -221,7 +221,7 @@ def _render_heatmap(df: pd.DataFrame, floor_size: tuple, floor_image: bytes | No
             [1.0,  "#22c55e"],   #   0 dBm 強
         ],
         zmin=-90, zmax=-40,
-        colorbar=dict(title="RSSI (dBm)", titleside="right"),
+        colorbar=dict(title=dict(text="RSSI (dBm)", side="top")),
         contours=dict(showlabels=True, labelfont=dict(size=10)),
         opacity=0.75,
     ))
