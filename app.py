@@ -29,11 +29,13 @@ st.set_page_config(
 )
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ─────────────────────────────────────────────────────
 # カスタムCSS 読み込み
 # ─────────────────────────────────────────────────────
 def _load_css():
-    css_path = os.path.join(os.path.dirname(__file__), "assets", "style.css")
+    css_path = os.path.join(BASE_DIR, "assets", "style.css")
     if os.path.exists(css_path):
         with open(css_path, encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
@@ -46,7 +48,7 @@ _load_css()
 # ─────────────────────────────────────────────────────
 @st.cache_resource
 def _load_config() -> dict:
-    cfg_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    cfg_path = os.path.join(BASE_DIR, "config.yaml")
     if os.path.exists(cfg_path):
         with open(cfg_path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
@@ -60,7 +62,11 @@ config = _load_config()
 # ─────────────────────────────────────────────────────
 @st.cache_resource
 def _init_resources(config: dict):
-    db_path = config.get("database", {}).get("path", "netops.db")
+    raw_db_path = config.get("database", {}).get("path", "netops.db")
+    if not os.path.isabs(raw_db_path):
+        db_path = os.path.join(BASE_DIR, raw_db_path)
+    else:
+        db_path = raw_db_path
     db      = Database(db_path)
     # デフォルト機器を初回登録
     defaults = config.get("default_devices", [])
