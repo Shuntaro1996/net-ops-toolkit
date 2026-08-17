@@ -1,4 +1,3 @@
-Set-Content -Path "README.md" -Value @"
 # 🌐 Network Ops Toolkit & Wi-Fi RSSI Dashboard
 
 ネットワーク運用・インフラ管理を効率化するためのPython/Streamlitベースの可視化ダッシュボードです。
